@@ -1,64 +1,64 @@
-cmake_minimum_required(VERSION 3.12)
-project(raylib-game-template)
+cmake_minimum_required(VERSION 3.5)
+project(raylib)
 
-# Generate compile_commands.json
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# Avoid excessive expansion of variables in conditionals. In particular, if
+# "PLATFORM" is "DRM" then:
+#
+# if (${PLATFORM} MATCHES "DRM")
+#
+# may expand e.g to:
+#
+# if (/usr/lib/aarch64-linux-gnu/libdrm.so MATCHES "DRM")
+#
+# See https://cmake.org/cmake/help/latest/policy/CMP0054.html
+cmake_policy(SET CMP0054 NEW)
 
-# Dependencies
-set(RAYLIB_VERSION 5.0)
-find_package(raylib ${RAYLIB_VERSION} QUIET) # QUIET or REQUIRED
-if (NOT raylib_FOUND) # If there's none, fetch and build raylib
-  include(FetchContent)
-  FetchContent_Declare(
-    raylib
-    DOWNLOAD_EXTRACT_TIMESTAMP OFF
-    URL https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION}.tar.gz
-  )
-  FetchContent_GetProperties(raylib)
-  if (NOT raylib_POPULATED) # Have we downloaded raylib yet?
-    set(FETCHCONTENT_QUIET NO)
-    FetchContent_Populate(raylib)
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
-    add_subdirectory(${raylib_SOURCE_DIR} ${raylib_BINARY_DIR})
+# Makes a hidden visibility preset on a static lib respected
+# This is used to hide glfw's symbols from the library exports when building an so/dylib
+# See https://cmake.org/cmake/help/latest/policy/CMP0063.html
+cmake_policy(SET CMP0063 NEW)
+
+# Directory for easier includes
+# Anywhere you see include(...) you can check <root>/cmake for that file
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+
+# RAYLIB_IS_MAIN determines whether the project is being used from root
+# or if it is added as a dependency (through add_subdirectory for example).
+if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+  set(RAYLIB_IS_MAIN TRUE)
+else()
+  set(RAYLIB_IS_MAIN FALSE)
+endif()
+
+# Sets compiler flags and language standard
+include(CompilerFlags)
+
+# Registers build options that are exposed to cmake
+include(CMakeOptions.txt)
+
+if (UNIX AND NOT APPLE)
+  if (NOT GLFW_BUILD_WAYLAND AND NOT GLFW_BUILD_X11)
+    MESSAGE(FATAL_ERROR "Cannot disable both Wayland and X11")
   endif()
 endif()
 
-# Our Project
-add_executable(${PROJECT_NAME})
-add_subdirectory(src)
+# Main sources directory (the second parameter sets the output directory name to raylib)
+add_subdirectory(src raylib)
 
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
+# Uninstall target
+if(NOT TARGET uninstall)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Uninstall.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+    IMMEDIATE @ONLY)
 
-set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:${PROJECT_NAME}>)
-
-if ("${PLATFORM}" STREQUAL "Web")
-    add_custom_command(
-        TARGET ${PROJECT_NAME} PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/src/resources $<TARGET_FILE_DIR:${PROJECT_NAME}>/../resources
-    )
-    #DEPENDS ${PROJECT_NAME}
-else()
-    add_custom_command(
-        TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/src/resources $<TARGET_FILE_DIR:${PROJECT_NAME}>/resources
-    )
-    #DEPENDS ${PROJECT_NAME}
+  add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
 endif()
 
-#set(raylib_VERBOSE 1)
-target_link_libraries(${PROJECT_NAME} raylib)
-
-# Web Configurations
-if ("${PLATFORM}" STREQUAL "Web")
-    # Tell Emscripten to build an example.html file.
-    set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
-    target_link_options(${PROJECT_NAME} PUBLIC -sUSE_GLFW=3 PUBLIC --preload-file resources)
+if (${BUILD_EXAMPLES})
+  MESSAGE(STATUS "Building examples is enabled")
+  add_subdirectory(examples)
 endif()
 
-# Checks if OSX and links appropriate frameworks (Only required on MacOS)
-if (APPLE)
-    target_link_libraries(${PROJECT_NAME} "-framework IOKit")
-    target_link_libraries(${PROJECT_NAME} "-framework Cocoa")
-    target_link_libraries(${PROJECT_NAME} "-framework OpenGL")
-endif()
+enable_testing()
